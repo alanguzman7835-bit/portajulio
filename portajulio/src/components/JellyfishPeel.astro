@@ -1,0 +1,448 @@
+---
+/* Art-print peel: malla subdividida 3.2×3.2 curvada en geometría real.
+   Requiere:  npm i three
+   Imagen:    la que le pases por props (webp / png).
+   Celular:   three.js se descarga solo cuando la sección está por aparecer,
+              y la malla usa menos subdivisiones en pantallas táctiles. */
+interface Props {
+  heading?: string;
+  webp?: string;
+  png?: string;
+  alt?: string;
+  signature?: string; // ruta a un SVG/PNG de la firma real (vacío = firma tipográfica)
+  signText?: string;  // texto de la firma tipográfica
+}
+const {
+  heading = 'Selección editorial',
+  webp = '/margin-jellyfish.webp',
+  png = '/margin-jellyfish.png',
+  alt = 'Fotografía de Julio',
+  signature = '',
+  signText = 'Julio',
+} = Astro.props;
+---
+
+<!-- CAMBIAR SVG / IMAGEN DE FIRMA AQUÍ: pasa signature="/firma.svg" (o .png con fondo transparente, trazo claro) desde index.astro.
+     Sin archivo, se dibuja la firma con tipografía script (signText). -->
+<section class="peel" data-peel data-webp={webp} data-png={png} data-signature={signature} data-sign-text={signText} aria-label="Selección editorial">
+  <h2 class="peel-heading anton">{heading}</h2>
+
+  <div class="peel-stage" data-stage>
+    <canvas class="peel-canvas" data-canvas aria-hidden="true"></canvas>
+    <!-- Respaldo estático: reduced-motion o sin WebGL -->
+    <img class="peel-fallback" data-fallback data-src={webp} data-src2={png} alt={alt} hidden />
+    <!-- CAMBIAR SVG / IMAGEN DE FIRMA AQUÍ (versión estática del respaldo; la animada se dibuja en el canvas) -->
+    <p class="peel-sign-static" data-sign-static hidden>
+      {signature ? <img src={signature} alt="Firma de Julio" /> : <span class="peel-sign-script">{signText}</span>}
+      <span class="peel-sign-cap">Julio — Signature / Personal Mark</span>
+    </p>
+    <span class="peel-sr">Al despegar la impresión aparece la firma de Julio.</span>
+    <button type="button" class="peel-hit" data-hit aria-pressed="false" aria-label="Despegar la impresión"></button>
+  </div>
+
+  <div class="peel-controls">
+    <span class="peel-tip">Toca la imagen para despegarla y ver la firma</span>
+    <button type="button" data-pause aria-pressed="false">Pausar</button>
+    <button type="button" data-replay>Repetir</button>
+  </div>
+</section>
+
+<script>
+  // @ts-nocheck
+  // three.js NO se importa aquí arriba: se carga con import() dinámico al acercarse la sección.
+
+  const SIZE = 3.2;
+  const COARSE = matchMedia('(pointer: coarse)').matches;
+  const DIV = COARSE ? 40 : 60; // menos vértices = menos trabajo por frame en celular
+  const PHI = (24 * Math.PI) / 180;
+  const THETA = (158 * Math.PI) / 180;
+  const R = 0.13 * SIZE;
+  const SAG = (-0.0032 / SIZE) * 100;
+  const KX = Math.sin(PHI), KY = -Math.cos(PHI);   // normal k
+  const IX = Math.cos(PHI), IY = Math.sin(PHI);    // tangente i
+  // Extensión real del cuadrado a lo largo de k. Con esto, p = 0 deja la hoja totalmente plana.
+  const EXT = (SIZE / 2) * (Math.abs(KX) + Math.abs(KY));
+  const HOVER_P = 0.9;
+  const easeOut = (t) => 1 - Math.pow(1 - t, 4); // power3.out
+  const easeIn = (t) => t * t * t * t;           // power3.in
+
+  function loadImage(urls) {
+    return new Promise((resolve, reject) => {
+      const tryNext = (i) => {
+        if (i >= urls.length) return reject(urls);
+        const im = new Image();
+        im.onload = () => resolve(im);
+        im.onerror = () => tryNext(i + 1);
+        im.src = urls[i];
+      };
+      tryNext(0);
+    });
+  }
+
+  /* Firma: imagen real (data-signature) o tipografía script. Nunca rechaza. */
+  async function signatureAssets(root) {
+    const src = root.dataset.signature;
+    let im = null;
+    if (src) {
+      try { im = await loadImage([src]); } catch (e) { im = null; }
+    } else {
+      try {
+        await Promise.race([
+          document.fonts.load('200px "Mrs Saint Delafield"'),
+          new Promise((r) => setTimeout(r, 1500)),
+        ]);
+      } catch (e) {}
+    }
+    return { im, text: root.dataset.signText || 'Julio' };
+  }
+
+  /* Fondo que queda al descubierto: cartulina oscura con la firma en la esquina inferior derecha.
+     Coordenadas de textura: la hoja se despega desde esa esquina, por eso la firma está ahí. */
+  function makeBaseTexture(THREE, sign) {
+    const N = 1024;
+    const c = document.createElement('canvas'); c.width = c.height = N;
+    const x = c.getContext('2d');
+    const g = x.createLinearGradient(0, 0, N, N);
+    g.addColorStop(0, '#2a2a2d'); g.addColorStop(1, '#202023');
+    x.fillStyle = g; x.fillRect(0, 0, N, N);
+    for (let i = 0; i < 6000; i++) {
+      x.fillStyle = `rgba(255,255,255,${Math.random() * 0.035})`;
+      x.fillRect(Math.random() * N, Math.random() * N, 1 + Math.random() * 2, 1);
+    }
+    x.save();
+    x.translate(0.73 * N, 0.82 * N);
+    x.rotate(-0.07);
+    x.textAlign = 'center'; x.textBaseline = 'alphabetic';
+    x.fillStyle = 'rgba(244,240,232,.94)';
+    if (sign.im) {
+      const k = Math.min(460 / sign.im.naturalWidth, 230 / sign.im.naturalHeight);
+      const w = sign.im.naturalWidth * k, h = sign.im.naturalHeight * k;
+      x.drawImage(sign.im, -w / 2, -h * 0.7, w, h);
+    } else {
+      x.font = '230px "Mrs Saint Delafield", "Snell Roundhand", "Segoe Script", cursive';
+      x.fillText(sign.text, 0, 0);
+    }
+    // trazo manuscrito bajo la firma
+    x.strokeStyle = 'rgba(244,240,232,.55)'; x.lineWidth = 2.5; x.lineCap = 'round';
+    x.beginPath(); x.moveTo(-210, 34); x.quadraticCurveTo(0, 18, 230, 40); x.stroke();
+    // leyenda
+    if ('letterSpacing' in x) x.letterSpacing = '3px';
+    x.font = '400 20px Inter, sans-serif';
+    x.fillStyle = 'rgba(244,240,232,.5)';
+    x.fillText('Julio — Signature / Personal Mark', 0, 84);
+    x.restore();
+    const t = new THREE.CanvasTexture(c);
+    t.colorSpace = THREE.SRGBColorSpace;
+    t.anisotropy = 4;
+    return t;
+  }
+
+  function init(root, THREE) {
+    const stage = root.querySelector('[data-stage]');
+    const canvas = root.querySelector('[data-canvas]');
+    const fallback = root.querySelector('[data-fallback]');
+    const hit = root.querySelector('[data-hit]');
+    const btnPause = root.querySelector('[data-pause]');
+    const btnReplay = root.querySelector('[data-replay]');
+    const controls = root.querySelector('.peel-controls');
+    const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+    const showFallback = () => {
+      // Carga el respaldo solo ahora: webp primero y png si falla
+      fallback.onerror = () => { fallback.onerror = null; fallback.src = fallback.dataset.src2; };
+      fallback.src = fallback.dataset.src;
+      canvas.hidden = true; fallback.hidden = false;
+      const st = root.querySelector('[data-sign-static]'); if (st) st.hidden = false;
+      controls.hidden = true; hit.hidden = true;
+    };
+    if (reduce || !THREE) return showFallback();
+
+    let renderer;
+    try {
+      renderer = new THREE.WebGLRenderer({ canvas, alpha: true, antialias: !COARSE });
+    } catch (e) { return showFallback(); }
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, COARSE ? 2 : 1.5));
+    renderer.outputColorSpace = THREE.SRGBColorSpace;
+    renderer.toneMapping = THREE.NoToneMapping;
+
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(30, 1, 0.1, 100);
+    scene.add(new THREE.AmbientLight(0xffffff, 0.95));
+    const sun = new THREE.DirectionalLight(0xffffff, 1.5);
+    sun.position.set(2, 3, 5);
+    scene.add(sun);
+
+    const disposables = [];
+    let geo, orig, group, shadow, frontTex;
+    let rafId = 0, running = false, destroyed = false;
+    let last = 0, elapsed = 0;
+    let anim = { from: 0, target: 0, start: 0, dur: 1100, ease: easeOut };
+    let p = 0, paused = false, visible = true, lastPointer = 'mouse', replayTimer = 0;
+
+    /* ---------- geometría del curl ---------- */
+    function applyCurl(prog) {
+      if (!geo) return;
+      const pos = geo.attributes.position.array;
+      const bottom = EXT, top = -EXT;
+      const cut = bottom - prog * 0.52 * (bottom - top);
+      for (let n = 0; n < pos.length; n += 3) {
+        const x = orig[n], y = orig[n + 1];
+        const d = x * KX + y * KY;
+        if (d <= cut) { pos[n] = x; pos[n + 1] = y; pos[n + 2] = 0; continue; }
+        const across = x * IX + y * IY;
+        const u = d - cut;
+        let dist, depth;
+        if (u <= R * THETA) {
+          dist = R * Math.sin(u / R);
+          depth = R * (1 - Math.cos(u / R));
+        } else {
+          const v = u - R * THETA;
+          const ang = THETA + v * SAG;
+          dist = R * Math.sin(THETA) + (Math.sin(ang) - Math.sin(THETA)) / SAG;
+          depth = R * (1 - Math.cos(THETA)) - (Math.cos(ang) - Math.cos(THETA)) / SAG;
+        }
+        const along = cut + dist;
+        pos[n] = across * IX + along * KX;
+        pos[n + 1] = across * IY + along * KY;
+        pos[n + 2] = depth;
+      }
+      geo.attributes.position.needsUpdate = true;
+      geo.computeVertexNormals();
+      geo.computeBoundingSphere();
+      geo.computeBoundingBox();
+      shadow.material.uniforms.uCut.value = cut;
+      shadow.material.uniforms.uAmt.value = Math.min(1, 1.6 * prog);
+    }
+    const draw = () => { applyCurl(p); renderer.render(scene, camera); };
+
+    /* ---------- bucle (solo mientras haya movimiento) ---------- */
+    const blocked = () =>
+      paused || !visible || document.hidden ||
+      !!document.querySelector('#lb.open, dialog[open], [aria-modal="true"].open');
+
+    function frame(now) {
+      rafId = 0;
+      if (destroyed) return;
+      if (blocked()) { running = false; return; } // se reanuda cuando deja de estar bloqueado
+      const dt = Math.min(now - last, 50); last = now; elapsed += dt;
+      const t = Math.min(1, (elapsed - anim.start) / anim.dur);
+      p = anim.from + (anim.target - anim.from) * anim.ease(t);
+      draw();
+      if (t < 1) rafId = requestAnimationFrame(frame);
+      else running = false;
+    }
+    function kick() {
+      if (running || destroyed || blocked()) return;
+      running = true; last = performance.now();
+      rafId = requestAnimationFrame(frame);
+    }
+    /* Cada acción toma una instantánea del progreso actual: la reversa es continua. */
+    function act(target) {
+      if (paused) return;
+      if (target === anim.target && running) return;
+      anim = target > p
+        ? { from: p, target, start: elapsed, dur: 1100, ease: easeOut }
+        : { from: p, target, start: elapsed, dur: 450, ease: easeIn };
+      hit.setAttribute('aria-pressed', String(target > 0));
+      kick();
+    }
+
+    /* ---------- tamaño y cámara ---------- */
+    function resize() {
+      const w = stage.clientWidth, h = stage.clientHeight;
+      if (!w || !h) return;
+      renderer.setSize(w, h, false);
+      const aspect = w / h;
+      camera.aspect = aspect;
+      camera.position.set(0, 0, aspect < 0.65 ? 15 : aspect < 1 ? 10.3 : 8.6);
+      camera.updateProjectionMatrix();
+      draw();
+    }
+
+    /* ---------- entrada ---------- */
+    hit.addEventListener('pointerdown', (e) => { lastPointer = e.pointerType; });
+    hit.addEventListener('pointerenter', (e) => { if (e.pointerType === 'mouse') { lastPointer = 'mouse'; act(HOVER_P); } });
+    hit.addEventListener('pointerleave', (e) => { if (e.pointerType === 'mouse') act(0); });
+    hit.addEventListener('focus', () => {
+      if (lastPointer === 'touch' || lastPointer === 'pen') return;  // el foco por toque no deshace el toggle
+      if (hit.matches(':focus-visible')) act(HOVER_P);
+    });
+    hit.addEventListener('blur', () => { if (lastPointer !== 'touch' && lastPointer !== 'pen') act(0); });
+    hit.addEventListener('click', (e) => {
+      const fromKeyboard = e.detail === 0;
+      if (lastPointer === 'touch' || lastPointer === 'pen' || fromKeyboard) act(anim.target > 0 ? 0 : HOVER_P);
+      else act(0); // clic con mouse: aplana
+    });
+    hit.addEventListener('keydown', (e) => {
+      if (e.key === 'ArrowRight') { e.preventDefault(); lastPointer = 'key'; act(HOVER_P); }
+      else if (e.key === 'ArrowLeft') { e.preventDefault(); lastPointer = 'key'; act(0); }
+      else if (e.key === 'Escape') root.dispatchEvent(new CustomEvent('peel:escape', { bubbles: true }));
+    });
+
+    btnPause.addEventListener('click', () => {
+      paused = !paused;
+      btnPause.setAttribute('aria-pressed', String(paused));
+      btnPause.textContent = paused ? 'Reanudar' : 'Pausar';
+      if (!paused && p !== anim.target) kick();
+    });
+    btnReplay.addEventListener('click', () => {
+      clearTimeout(replayTimer);
+      if (paused) btnPause.click();
+      act(0);
+      replayTimer = setTimeout(() => {
+        act(HOVER_P);
+        replayTimer = setTimeout(() => act(0), 1100 + 900);
+      }, 480);
+    });
+
+    /* ---------- observers ---------- */
+    const ro = new ResizeObserver(resize);
+    ro.observe(stage);
+    const io = new IntersectionObserver(([en]) => {
+      visible = en.isIntersecting;
+      if (visible && p !== anim.target) kick();
+    }, { threshold: 0.05 });
+    io.observe(root);
+    const onVis = () => { if (!document.hidden && p !== anim.target) kick(); };
+    document.addEventListener('visibilitychange', onVis);
+    // Reanudar cuando se cierra un modal (el lightbox usa la clase .open)
+    const lbEl = document.getElementById('lb');
+    const mo = lbEl ? new MutationObserver(() => { if (p !== anim.target) kick(); }) : null;
+    if (mo) mo.observe(lbEl, { attributes: true, attributeFilter: ['class'] });
+
+    /* ---------- construir la escena cuando carga la imagen ---------- */
+    Promise.all([loadImage([root.dataset.webp, root.dataset.png]), signatureAssets(root)]).then(([img, sign]) => {
+      if (destroyed) return;
+      // Textura frontal: recorte "cover" centrado sobre canvas cuadrado, sin estirar.
+      const TEX = COARSE ? 1024 : 1024;
+      const c = document.createElement('canvas'); c.width = c.height = TEX;
+      const s = Math.min(img.naturalWidth, img.naturalHeight);
+      c.getContext('2d').drawImage(img, (img.naturalWidth - s) / 2, (img.naturalHeight - s) / 2, s, s, 0, 0, TEX, TEX);
+      frontTex = new THREE.CanvasTexture(c);
+      frontTex.colorSpace = THREE.SRGBColorSpace;
+      frontTex.anisotropy = Math.min(renderer.capabilities.getMaxAnisotropy(), COARSE ? 4 : 16);
+
+      // Textura trasera: papel gris verdoso sutil
+      const b = document.createElement('canvas'); b.width = b.height = 256;
+      const bx = b.getContext('2d');
+      bx.fillStyle = '#8c9a92'; bx.fillRect(0, 0, 256, 256);
+      for (let i = 0; i < 5000; i++) {
+        const v = 120 + Math.random() * 60;
+        bx.fillStyle = `rgba(${v - 10},${v},${v - 6},.18)`;
+        bx.fillRect(Math.random() * 256, Math.random() * 256, 1 + Math.random() * 2, 1);
+      }
+      const backTex = new THREE.CanvasTexture(b);
+      backTex.colorSpace = THREE.SRGBColorSpace;
+      backTex.wrapS = backTex.wrapT = THREE.RepeatWrapping;
+
+      geo = new THREE.PlaneGeometry(SIZE, SIZE, DIV, DIV);
+      orig = new Float32Array(geo.attributes.position.array); // posiciones originales inmutables
+
+      const front = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ map: frontTex, side: THREE.FrontSide, roughness: 0.55, metalness: 0 }));
+      const back = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ map: backTex, side: THREE.BackSide, roughness: 0.9, metalness: 0 }));
+      // Fondo con la firma (queda al descubierto en la esquina inferior derecha)
+      const baseTex = makeBaseTexture(THREE, sign);
+      const base = new THREE.Mesh(new THREE.PlaneGeometry(SIZE, SIZE), new THREE.MeshBasicMaterial({ map: baseTex }));
+      base.position.z = -0.003;
+      // Sombra que proyecta la curva sobre el fondo: sigue la línea de corte del despegue
+      shadow = new THREE.Mesh(
+        new THREE.PlaneGeometry(SIZE, SIZE),
+        new THREE.ShaderMaterial({
+          transparent: true, depthWrite: false,
+          uniforms: { uCut: { value: EXT }, uAmt: { value: 0 } },
+          vertexShader: 'varying vec2 vP; void main(){ vP = position.xy; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
+          fragmentShader: `uniform float uCut; uniform float uAmt; varying vec2 vP;
+            void main(){
+              float t = dot(vP, vec2(${KX.toFixed(6)}, ${KY.toFixed(6)})) - uCut;
+              float a = smoothstep(0.0, 0.06, t) * 0.62 * exp(-pow(t / 0.55, 2.0));
+              gl_FragColor = vec4(0.0, 0.0, 0.0, a * uAmt);
+            }`,
+        })
+      );
+      shadow.position.z = -0.002;
+
+      group = new THREE.Group();
+      group.position.y = -0.15;
+      group.rotation.z = -0.08;
+      group.add(base, shadow, front, back);
+      scene.add(group);
+      disposables.push(geo, front.material, back.material, base.geometry, base.material, baseTex, shadow.geometry, shadow.material, frontTex, backTex);
+      resize();
+    }).catch((urls) => {
+      console.error('No se pudo cargar la imagen del peel. Revisa que exista en /public:', urls);
+      showFallback();
+    });
+
+    /* ---------- limpieza ---------- */
+    function destroy() {
+      if (destroyed) return;
+      destroyed = true;
+      cancelAnimationFrame(rafId); clearTimeout(replayTimer);
+      ro.disconnect(); io.disconnect(); mo && mo.disconnect();
+      document.removeEventListener('visibilitychange', onVis);
+      disposables.forEach((d) => d.dispose && d.dispose());
+      renderer.dispose();
+      renderer.forceContextLoss && renderer.forceContextLoss();
+    }
+    document.addEventListener('astro:before-swap', destroy, { once: true });
+    addEventListener('pagehide', destroy, { once: true });
+  }
+
+  /* Carga diferida: three.js se descarga cuando la sección está a ~600px de aparecer */
+  document.querySelectorAll('[data-peel]').forEach((root) => {
+    if (matchMedia('(prefers-reduced-motion: reduce)').matches) return init(root, null);
+    const lazy = new IntersectionObserver(async ([en]) => {
+      if (!en.isIntersecting) return;
+      lazy.disconnect();
+      try {
+        const THREE = await import('three');
+        init(root, THREE);
+      } catch (e) {
+        console.error('No se pudo cargar three.js. ¿Corriste npm i three?', e);
+        init(root, null);
+      }
+    }, { rootMargin: '600px 0px' });
+    lazy.observe(root);
+  });
+</script>
+
+<style is:global>
+  .peel { position: relative; background: #09090b; overflow: hidden; padding: 4rem 0 2rem; }
+  .peel-heading {
+    position: absolute; left: 50%; top: 42%; transform: translate(-50%, -50%);
+    width: 92%; max-width: 1400px; text-align: center; text-transform: uppercase;
+    font-size: clamp(56px, 14vw, 230px); line-height: .92; color: #f4f0e8; z-index: 0; pointer-events: none;
+  }
+  /* Celular: escenario más bajo; escritorio: alto original */
+  .peel-stage { position: relative; z-index: 1; width: 100%; height: min(70svh, 1000px); }
+  .peel-canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .peel-fallback { position: absolute; inset: 0; margin: auto; max-width: 92%; max-height: 80%; aspect-ratio: 1; object-fit: cover; }
+  /* Firma estática (reduced-motion o sin WebGL): debajo de la imagen */
+  .peel-sign-static { position: absolute; left: 0; right: 0; bottom: 1%; margin: 0; display: flex; flex-direction: column; align-items: center; gap: .25rem; color: #f4f0e8; }
+  .peel-sign-static img { max-height: 5rem; width: auto; }
+  .peel-sign-script { font-family: 'Mrs Saint Delafield', 'Snell Roundhand', 'Segoe Script', cursive; font-size: clamp(48px, 9vw, 84px); line-height: 1; }
+  .peel-sign-cap { font: 400 .75rem 'Inter', sans-serif; letter-spacing: .12em; color: rgba(244, 240, 232, .5); }
+  .peel-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  .peel-hit {
+    position: absolute; inset: 0; width: 100%; height: 100%; background: transparent; border: 0;
+    cursor: pointer; touch-action: manipulation; -webkit-tap-highlight-color: transparent;
+  }
+  .peel-hit:focus-visible { outline: 2px solid #f4f0e8; outline-offset: -8px; }
+  .peel-controls { position: relative; z-index: 2; display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: .5rem 1.25rem; margin-top: 1rem; padding: 0 1rem; }
+  .peel-controls button {
+    background: none; border: 0; color: rgba(244, 240, 232, .55); font: 400 .8125rem 'Inter', sans-serif;
+    padding: .75rem 1rem; cursor: pointer; transition: color .3s;
+  }
+  .peel-controls button:hover { color: #f4f0e8; }
+  .peel-controls button:focus-visible { outline: 2px solid #f4f0e8; outline-offset: 2px; }
+  /* Pista de toque: solo en pantallas sin hover */
+  .peel-tip { display: none; flex-basis: 100%; text-align: center; color: rgba(244, 240, 232, .5); font: 400 .75rem 'Inter', sans-serif; }
+  @media (hover: none) { .peel-tip { display: block; } }
+  .peel-fallback[hidden], .peel-canvas[hidden], .peel-controls[hidden], .peel-hit[hidden], .peel-sign-static[hidden] { display: none; }
+  .rm .peel-heading { position: relative; left: auto; top: auto; transform: none; margin: 0 auto 2rem; }
+
+  @media (min-width: 768px) {
+    .peel { padding: 5rem 0 2.5rem; }
+    .peel-stage { height: min(86svh, 1000px); }
+  }
+</style>

@@ -1,0 +1,646 @@
+---
+import JellyfishPeel from '../components/JellyfishPeel.astro';
+import { google } from 'googleapis';
+import path from 'node:path';
+
+/* ================= CONFIG =================
+   Tus fotos están en /public: julio1.jpeg ... julio9.jpeg (se sirven como /julio1.jpeg, etc.).
+   Si un archivo no existe, se usa la imagen de Unsplash (fb) como respaldo.
+   TIP celular: redimensiona tus fotos a ~1600px de lado largo (JPG/WebP calidad 80). */
+const u = (id: string, w = 1400) =>
+  `https://images.unsplash.com/${id}?auto=format&fit=crop&w=${w}&q=80`;
+
+const HEADLINE_1 = 'JULIO FOTOS'; // 1ª animación (hero)
+
+// CAMBIAR FOTO DEL PEEL (3ª ANIMACIÓN) AQUÍ: cualquier imagen de /public, se recorta en cuadrado sin estirarse
+const PEEL = '/julio2.jpeg';
+
+// CAMBIAR SVG / IMAGEN DE FIRMA AQUÍ: pon la ruta de la firma real de Julio (SVG o PNG con fondo transparente y trazo claro),
+// por ejemplo '/firma.svg' guardada en /public. Vacío = firma con tipografía script (texto SIGN_TEXT).
+const SIGNATURE = '';
+const SIGN_TEXT = 'Julio';
+
+// CAMBIAR IMAGEN DEL HERO AQUÍ
+const HERO = { src: '/julio7.jpeg', fb: u('photo-1506905925346-21bda4d32df4', 2000) };
+// CAMBIAR FOTO DE AUTOR AQUÍ
+const ABOUT = { src: '/julio1.jpeg', fb: u('photo-1507003211169-0a1dd7228f2d', 1000) };
+
+/* ---- Fotos destacadas: 3 verticales, mismo origen para el estado gris y el de color ---- */
+const FEATURED = [
+  // CAMBIAR FOTO DESTACADA 1 AQUÍ
+  { t: 'Mirada de tarde', src: '/julio3.jpeg', fb: u('photo-1517841905240-472988babdf9', 1200) },
+  // CAMBIAR FOTO DESTACADA 2 AQUÍ
+  { t: 'Luz de ventana', src: '/julio4.jpeg', fb: u('photo-1531746020798-e6953c6e8e04', 1200) },
+  // CAMBIAR FOTO DESTACADA 3 AQUÍ
+  { t: 'Estudio', src: '/julio9.jpeg', fb: u('photo-1488426862026-3ee34a7d66df', 1200) },
+];
+
+/* ---- Animación del peel: qué mostrar.  'peel' = hoja que se despega (3D) · 'sweep' = texto con fotos en parallax ---- */
+const SECOND = 'peel';
+const HEADLINE_2 = 'EDITORIAL SELECTION // 2026';
+/* Fotos del modo 'sweep'. at = posición a lo largo del texto (0-1), speed = velocidad relativa, z: 10 detrás / 30 delante */
+const SELECT = [
+  // CAMBIAR FOTO 2ND ANIMATION HERE (1)
+  { fb: u('photo-1515886657613-9f3515b0c78f', 900), at: 0.02, speed: 1.15, top: '14%', w: 'clamp(130px,19vw,300px)', ratio: '3/4', z: 30 },
+  // CAMBIAR FOTO 2ND ANIMATION HERE (2)
+  { fb: u('photo-1470071459604-3b5ec3a7fe05', 900), at: 0.18, speed: 0.95, top: '58%', w: 'clamp(150px,24vw,380px)', ratio: '4/3', z: 10 },
+  // CAMBIAR FOTO 2ND ANIMATION HERE (3)
+  { fb: u('photo-1514525253161-7a46d19cd819', 900), at: 0.36, speed: 1.3, top: '8%', w: 'clamp(120px,17vw,260px)', ratio: '4/5', z: 30 },
+  // CAMBIAR FOTO 2ND ANIMATION HERE (4)
+  { fb: u('photo-1519741497674-611481863552', 900), at: 0.5, speed: 1.05, top: '56%', w: 'clamp(130px,20vw,320px)', ratio: '3/4', z: 30 },
+  // CAMBIAR FOTO 2ND ANIMATION HERE (5)
+  { fb: u('photo-1500648767791-00dcc994a43e', 900), at: 0.68, speed: 1.2, top: '12%', w: 'clamp(140px,22vw,340px)', ratio: '4/3', z: 10 },
+  // CAMBIAR FOTO 2ND ANIMATION HERE (6)
+  { fb: u('photo-1529139574466-a303027c1d8b', 900), at: 0.82, speed: 1.0, top: '55%', w: 'clamp(120px,17vw,270px)', ratio: '3/4', z: 30 },
+];
+
+/* ---- Galería masonry. Proporciones mixtas (r) para el escalonamiento tipo Pinterest.
+   EXIF: cam, lens, iso, speed ---- */
+const PHOTOS_LOCAL = [
+  { t: 'Mirada de tarde', cat: 'Retrato', src: '/julio1.jpeg', fb: u('photo-1494790108377-be9c29b29330', 900), cam: 'Sony A7 III', lens: '85mm f/1.8', iso: 100, speed: '1/250 s', r: 'aspect-[3/4]' },
+  { t: 'Cumbres', cat: 'Paisaje', src: '/julio5.jpeg', fb: u('photo-1506905925346-21bda4d32df4', 900), cam: 'Canon EOS R6', lens: '24-70mm f/8', iso: 100, speed: '1/160 s', r: 'aspect-[4/3]' },
+  { t: 'Hora azul', cat: 'Urbano', src: '/julio6.jpeg', fb: u('photo-1449824913935-59a10b8d2000', 900), cam: 'Sony A7 III', lens: '35mm f/1.4', iso: 800, speed: '1/60 s', r: 'aspect-[4/5]' },
+  { t: 'Pasarela', cat: 'Moda', src: '/julio8.jpeg', fb: u('photo-1509631179647-0177331693ae', 900), cam: 'Canon EOS R6', lens: '70-200mm f/2.8', iso: 1600, speed: '1/500 s', r: 'aspect-[9/16]' },
+  { t: 'Luz de ventana', cat: 'Retrato', src: '', fb: u('photo-1500648767791-00dcc994a43e', 900), cam: 'Canon EOS R6', lens: '85mm f/1.2', iso: 200, speed: '1/320 s', r: 'aspect-square' },
+  { t: 'Bosque en niebla', cat: 'Paisaje', src: '', fb: u('photo-1470071459604-3b5ec3a7fe05', 900), cam: 'Fujifilm X-T4', lens: '16-55mm f/5.6', iso: 200, speed: '1/100 s', r: 'aspect-[3/4]' },
+  { t: 'Editorial en estudio', cat: 'Moda', src: '', fb: u('photo-1515886657613-9f3515b0c78f', 900), cam: 'Sony A7 III', lens: '50mm f/2', iso: 200, speed: '1/200 s', r: 'aspect-[4/5]' },
+  { t: 'Calles de noche', cat: 'Urbano', src: '', fb: u('photo-1477959858617-67f85cf4f1df', 900), cam: 'Fujifilm X-T4', lens: '23mm f/2', iso: 1600, speed: '1/80 s', r: 'aspect-[9/16]' },
+  { t: 'Lago al amanecer', cat: 'Paisaje', src: '', fb: u('photo-1501785888041-af3ef285b470', 900), cam: 'Sony A7 III', lens: '16-35mm f/11', iso: 100, speed: '1/125 s', r: 'aspect-square' },
+  { t: 'Retrato en la ciudad', cat: 'Retrato', src: '', fb: u('photo-1507003211169-0a1dd7228f2d', 900), cam: 'Sony A7 III', lens: '50mm f/1.8', iso: 320, speed: '1/250 s', r: 'aspect-[4/5]' },
+  { t: 'Skyline', cat: 'Urbano', src: '', fb: u('photo-1480714378408-67cf0d13bc1b', 900), cam: 'Canon EOS R6', lens: '24-70mm f/5.6', iso: 400, speed: '1/320 s', r: 'aspect-[3/4]' },
+  { t: 'Look de otoño', cat: 'Moda', src: '', fb: u('photo-1529139574466-a303027c1d8b', 900), cam: 'Canon EOS R6', lens: '85mm f/2', iso: 400, speed: '1/400 s', r: 'aspect-[3/4]' },
+  { t: 'Montañas al atardecer', cat: 'Paisaje', src: '', fb: u('photo-1469474968028-56623f02e42e', 900), cam: 'Fujifilm X-T4', lens: '10-24mm f/9', iso: 125, speed: '1/60 s', r: 'aspect-[4/3]' },
+  { t: 'Retrato de estudio', cat: 'Retrato', src: '', fb: u('photo-1534528741775-53994a69daeb', 900), cam: 'Sony A7 III', lens: '85mm f/2', iso: 100, speed: '1/160 s', r: 'aspect-[9/16]' },
+];
+const FB = 'this.onerror=null;this.src=this.dataset.fb';
+const year = new Date().getFullYear();
+
+/* ================= GALERÍA DE ABAJO DESDE GOOGLE DRIVE =================
+   Solo alimenta la galería masonry. Las fotos del hero, destacadas y peel siguen manuales (arriba).
+   Requisitos:
+   1) npm i googleapis
+   2) credentials.json (cuenta de servicio) en la raíz del proyecto, y agregado a .gitignore
+   3) Carpeta de Drive compartida con el "client_email" de credentials.json (rol Lector)
+   4) Para que las fotos se vean en el navegador, la carpeta debe estar como "Cualquier persona con el enlace"
+   CATEGORÍAS (filtros): crea subcarpetas dentro de la carpeta con el nombre de la categoría
+   (Retrato, Moda, Urbano, Paisaje...). Las fotos sueltas en la carpeta principal van a "Otras".
+   Si Drive falla o está vacía, se usa PHOTOS_LOCAL como respaldo. */
+// CAMBIAR ID DE LA CARPETA DE DRIVE AQUÍ
+const DRIVE_FOLDER_ID = '1PIR20UVzmiexmStcR3ydhk5GoxBHy7QJ';
+
+type Photo = { t: string; cat: string; src: string; big: string; fb: string; cam: string; lens: string; iso: string | number; speed: string; r: string; ratio: string };
+const drivePhotos: Photo[] = [];
+const driveCats: string[] = [];
+let driveError = '';
+
+const FIELDS = 'nextPageToken, files(id, name, imageMediaMetadata(width,height,rotation,cameraMake,cameraModel,lens,isoSpeed,exposureTime,aperture))';
+const cleanName = (n: string) => n.replace(/\.[^.]+$/, '').replace(/[_-]+/g, ' ').trim() || 'Fotografía';
+
+try {
+  const auth = new google.auth.GoogleAuth({
+    keyFile: path.join(process.cwd(), 'credentials.json'),
+    scopes: ['https://www.googleapis.com/auth/drive.readonly'],
+  });
+  const drive: any = google.drive({ version: 'v3', auth });
+
+  const listAll = async (q: string, fields: string) => {
+    const out: any[] = [];
+    let pageToken: string | undefined;
+    do {
+      const res = await drive.files.list({ q, fields, orderBy: 'name', pageSize: 100, pageToken, supportsAllDrives: true, includeItemsFromAllDrives: true });
+      out.push(...(res.data.files ?? []));
+      pageToken = res.data.nextPageToken ?? undefined;
+    } while (pageToken);
+    return out;
+  };
+  const IMG = "mimeType contains 'image/' and trashed = false";
+
+  const toPhoto = (f: any, cat: string): Photo => {
+    const m = f.imageMediaMetadata ?? {};
+    const swap = m.rotation === 1 || m.rotation === 3; // fotos giradas 90°: intercambia ancho/alto
+    const w = swap ? m.height : m.width, h = swap ? m.width : m.height;
+    const t = typeof m.exposureTime === 'number' ? m.exposureTime : 0;
+    const base = `https://lh3.googleusercontent.com/d/${f.id}`;
+    return {
+      t: cleanName(f.name ?? ''),
+      cat,
+      src: `${base}=w900`,   // miniatura de la galería
+      big: `${base}=w2000`,  // tamaño del lightbox
+      fb: base,
+      cam: [m.cameraMake, m.cameraModel].filter(Boolean).join(' ') || '—',
+      lens: `${m.lens ?? '—'}${m.aperture ? ' f/' + m.aperture : ''}`,
+      iso: m.isoSpeed ?? '—',
+      speed: t ? (t >= 1 ? `${t} s` : `1/${Math.round(1 / t)} s`) : '—',
+      r: '',
+      ratio: w && h ? `${w}/${h}` : '4/5',
+    };
+  };
+
+  // Subcarpetas = categorías
+  const folders = await listAll(`'${DRIVE_FOLDER_ID}' in parents and mimeType = 'application/vnd.google-apps.folder' and trashed = false`, 'nextPageToken, files(id, name)');
+  for (const fo of folders) {
+    const files = await listAll(`'${fo.id}' in parents and ${IMG}`, FIELDS);
+    if (!files.length) continue;
+    driveCats.push(fo.name);
+    files.forEach((f) => drivePhotos.push(toPhoto(f, fo.name)));
+  }
+  // Fotos sueltas en la carpeta principal
+  const loose = await listAll(`'${DRIVE_FOLDER_ID}' in parents and ${IMG}`, FIELDS);
+  if (loose.length) {
+    driveCats.push('Otras');
+    loose.forEach((f) => drivePhotos.push(toPhoto(f, 'Otras')));
+  }
+} catch (e) {
+  driveError = e instanceof Error ? e.message : String(e);
+  console.error('[Drive] No se pudo cargar la galería, uso el respaldo local:', driveError);
+}
+
+const PHOTOS: any[] = drivePhotos.length ? drivePhotos : PHOTOS_LOCAL;
+const CATS = drivePhotos.length ? ['Todas', ...driveCats] : ['Todas', 'Retrato', 'Moda', 'Urbano', 'Paisaje'];
+---
+
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Julio Fotos — Visual Portfolio</title>
+    <!-- Respeta prefers-reduced-motion antes del primer pintado -->
+    <script is:inline>
+      if (matchMedia('(prefers-reduced-motion: reduce)').matches) document.documentElement.classList.add('rm');
+      // Cursor "J": solo con mouse real; en táctil no se activa y se conserva el puntero nativo
+      if (matchMedia('(hover: hover) and (pointer: fine)').matches) document.documentElement.classList.add('has-cursor');
+    </script>
+    <!-- Tailwind por CDN para que funcione sin configurar nada.
+         En producción: npx astro add tailwind y borra esta línea. -->
+    <script is:inline src="https://cdn.tailwindcss.com"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Anton&family=Fraunces:ital,opsz,wght@1,9..144,300&family=Inter:wght@300;400;500&family=Mrs+Saint+Delafield&display=swap" rel="stylesheet" />
+  </head>
+  <body>
+    <!-- ===== CURSOR J ===== -->
+    <!-- CAMBIAR CURSOR J AQUÍ: la letra está en .cur-j, el diseño del anillo en el CSS (#cursor) y las etiquetas en CUR_LABELS del script -->
+    <div id="cursor" aria-hidden="true">
+      <div class="cur-ring"><span class="cur-j">J</span><span class="cur-label"></span></div>
+    </div>
+
+    <!-- ===== NAVBAR ===== -->
+    <nav class="fixed top-3 md:top-4 left-1/2 -translate-x-1/2 z-50 w-[94%] md:w-[92%] max-w-3xl flex items-center justify-between px-4 md:px-6 py-2.5 md:py-3 rounded-full border border-white/10 bg-black/50 backdrop-blur-md md:backdrop-blur-xl">
+      <a href="#inicio" class="anton text-base md:text-xl tracking-wider uppercase">Julio Fotos</a>
+      <div class="flex gap-4 md:gap-8 text-xs md:text-sm text-white/70">
+        <a class="hover:text-white transition py-1" href="#galeria">Galería</a>
+        <a class="hover:text-white transition py-1" href="#sobre-mi">Sobre mí</a>
+        <a class="hover:text-white transition py-1" href="#contacto">Contacto</a>
+      </div>
+    </nav>
+
+    <!-- ===== 1. HERO: runway con marco fijo (más corto en celular) ===== -->
+    <section id="inicio" data-runway class="relative h-[300vh] md:h-[400vh]">
+      <div data-frame class="sticky top-0 h-[100svh] overflow-hidden bg-black">
+        <!-- CAMBIAR IMAGEN DEL HERO AQUÍ: edita HERO en el frontmatter -->
+        <img data-zoom fetchpriority="high" decoding="async" src={HERO.src} data-fb={HERO.fb} onerror={FB} alt="Fotografía destacada de Julio" class="bg absolute inset-0 w-full h-full object-cover" />
+        <div class="absolute inset-0 bg-black/30 pointer-events-none"></div>
+        <div class="absolute inset-x-0 bottom-0 h-1/3 bg-gradient-to-t from-[#09090b]/80 to-transparent pointer-events-none"></div>
+        <h1 data-head class="anton absolute left-0 top-1/2 w-max whitespace-nowrap uppercase text-[#f4f0e8] leading-none" style="font-size:clamp(120px,28vw,450px);transform:translate3d(100vw,-50%,0)">{HEADLINE_1}</h1>
+        <div data-hint class="absolute bottom-8 left-1/2 -translate-x-1/2 text-sm text-white/80 text-center px-4">Desliza para recorrer el portafolio</div>
+        <div class="absolute bottom-0 left-0 h-[3px] w-full bg-white/10"><div data-bar class="h-full w-full bg-[#f4f0e8] origin-left" style="transform:scaleX(0)"></div></div>
+      </div>
+    </section>
+
+    <!-- ===== 2. FOTOS DESTACADAS: gris a color ===== -->
+    <section id="destacadas" aria-label="Fotos destacadas">
+      <div class="relative px-4 md:px-[5%] py-8 md:py-[6%]">
+        <div id="featGrid" class="grid grid-cols-1 md:grid-cols-3 gap-3 md:gap-[1.2%]">
+          {FEATURED.map((p, i) => (
+            <Fragment>
+              <Fragment set:html={`<!-- CAMBIAR FOTO DESTACADA ${i + 1} AQUÍ (edita FEATURED en el frontmatter) -->`} />
+              <button type="button" class="fphoto relative block w-full overflow-hidden aspect-[3/4] bg-neutral-900" aria-pressed="false" aria-label={`Ver ${p.t} a color`}>
+                <img loading="lazy" decoding="async" src={p.src || p.fb} data-fb={p.fb} onerror={FB} alt={p.t} class="w-full h-full object-cover" />
+              </button>
+            </Fragment>
+          ))}
+        </div>
+        <!-- Título superpuesto: no intercepta clics -->
+        <h2 class="featured-title pointer-events-none absolute left-8 bottom-12 md:left-[calc(5%+1.25rem)] md:bottom-[calc(6%+1.25rem)] z-10 text-[#f4f0e8]">
+          <span class="anton block uppercase text-4xl md:text-8xl leading-[.9]">Selección de autor</span>
+          <span class="serif-it block text-3xl md:text-7xl leading-none mt-2">In full bloom</span>
+        </h2>
+      </div>
+      <div class="px-4 md:px-[5%] pb-10 md:pb-16 md:-mt-[3%] flex justify-end">
+        <button type="button" id="featReset" class="text-sm text-[#f4f0e8]/50 hover:text-[#f4f0e8] disabled:opacity-0 disabled:pointer-events-none transition px-3 py-2" disabled>Reset</button>
+      </div>
+    </section>
+
+    <!-- ===== 3. SEGUNDA ANIMACIÓN (cambia con la constante SECOND del frontmatter) ===== -->
+    <!-- CAMBIAR SVG / IMAGEN DE FIRMA AQUÍ: edita SIGNATURE / SIGN_TEXT en el frontmatter -->
+    <div id="seleccion">
+      {SECOND === 'peel' ? (
+        <JellyfishPeel heading="Editorial selection" webp={PEEL} png={PEEL} signature={SIGNATURE} signText={SIGN_TEXT} />
+      ) : (
+        <section data-runway class="relative h-[300vh] md:h-[400vh]">
+          <div data-frame class="sticky top-0 h-[100svh] overflow-hidden bg-[#09090b]">
+            <h2 data-head class="anton absolute left-0 top-1/2 w-max whitespace-nowrap uppercase text-[#f4f0e8] leading-none z-20" style="font-size:clamp(100px,24vw,400px);transform:translate3d(100vw,-50%,0)">{HEADLINE_2}</h2>
+            {SELECT.map((p) => (
+              <img data-at={p.at} data-speed={p.speed} src={p.fb} alt="" loading="lazy" decoding="async"
+                class="absolute left-0 object-cover shadow-2xl"
+                style={`top:${p.top};width:${p.w};aspect-ratio:${p.ratio};z-index:${p.z};transform:translate3d(100vw,0,0)`} />
+            ))}
+            <div class="absolute bottom-0 left-0 h-[3px] w-full bg-white/10 z-40"><div data-bar class="h-full w-full bg-[#f4f0e8] origin-left" style="transform:scaleX(0)"></div></div>
+          </div>
+        </section>
+      )}
+    </div>
+
+    <!-- ===== 4. GALERÍA COMPLETA: masonry estilo Pinterest ===== -->
+    <section id="galeria" class="bg-[#171717]">
+      <div class="max-w-7xl mx-auto px-4 md:px-10 py-16 md:py-28">
+        <h2 class="anton uppercase text-5xl md:text-8xl leading-none mb-8 md:mb-10">Galería</h2>
+
+        <!-- Filtros flotantes: se quedan arriba mientras recorres el masonry; en celular hacen scroll horizontal -->
+        <div class="sticky top-16 md:top-20 z-30 flex justify-center mb-8 md:mb-10">
+          <div id="filters" class="no-scrollbar flex flex-nowrap md:flex-wrap justify-start md:justify-center gap-1 md:gap-2 p-1.5 md:p-2 max-w-full overflow-x-auto rounded-full border border-white/10 bg-black/60 md:bg-black/50 backdrop-blur-md md:backdrop-blur-xl shadow-lg shadow-black/40" role="group" aria-label="Filtrar por categoría">
+            {CATS.map((c, i) => (
+              <button type="button" data-filter={c} class:list={['chip shrink-0 whitespace-nowrap px-4 md:px-5 py-2 rounded-full text-sm text-white/70 hover:text-white', { on: i === 0 }]}>{c}</button>
+            ))}
+          </div>
+        </div>
+
+        <div id="grid" class="columns-2 md:columns-3 lg:columns-4 gap-3 md:gap-4">
+          {PHOTOS.map((p, i) => (
+            <Fragment>
+              <Fragment set:html={`<!-- CAMBIAR FOTO MASONRY ${i + 1} AQUÍ (ahora vienen de Drive; PHOTOS_LOCAL es el respaldo) -->`} />
+              <button type="button" class={`card block w-full relative overflow-hidden rounded-xl md:rounded-2xl mb-3 md:mb-4 break-inside-avoid bg-neutral-900 shadow-lg shadow-black/40 text-left ${p.r}`} data-cat={p.cat} style={p.ratio ? `aspect-ratio:${p.ratio}` : undefined} aria-label={`Abrir ${p.t}`}>
+                <img loading="lazy" decoding="async" src={p.src || p.fb} data-fb={p.fb} onerror={FB} alt={`${p.t}, fotografía de ${p.cat.toLowerCase()}`} class="w-full h-full object-cover" />
+                <div class="cap absolute inset-0 flex flex-col justify-end p-3 md:p-5 bg-gradient-to-t from-black/80 via-black/20 to-transparent">
+                  <div class="anton uppercase text-base md:text-2xl tracking-wide leading-tight">{p.t}</div>
+                  <div class="text-xs md:text-sm text-white/70">{p.cat}</div>
+                </div>
+              </button>
+            </Fragment>
+          ))}
+        </div>
+      </div>
+    </section>
+
+    <!-- ===== LIGHTBOX ===== -->
+    <div id="lb" class="fixed inset-x-0 top-0 h-[100dvh] z-[60] bg-black/95 flex flex-col" role="dialog" aria-modal="true" aria-label="Visor de fotografías">
+      <div class="flex justify-between items-center p-4 md:p-5">
+        <span id="lbCount" class="text-sm text-white/50"></span>
+        <button type="button" id="lbClose" class="text-4xl md:text-3xl leading-none px-3 py-1 hover:rotate-90 transition" aria-label="Cerrar">&times;</button>
+      </div>
+      <div class="flex-1 min-h-0 flex items-center justify-between gap-1 md:gap-2 px-1 md:px-8">
+        <button type="button" id="lbPrev" class="p-2 md:p-3 text-3xl md:text-4xl text-white/60 hover:text-white hover:-translate-x-1 transition" aria-label="Anterior">&#8249;</button>
+        <img id="lbImg" alt="" class="max-h-full max-w-[78vw] md:max-w-[80vw] object-contain" />
+        <button type="button" id="lbNext" class="p-2 md:p-3 text-3xl md:text-4xl text-white/60 hover:text-white hover:translate-x-1 transition" aria-label="Siguiente">&#8250;</button>
+      </div>
+      <div class="p-4 pb-6 md:p-8 text-center">
+        <h3 id="lbTitle" class="anton uppercase text-2xl md:text-3xl tracking-wide mb-2 md:mb-3"></h3>
+        <dl id="lbMeta" class="flex flex-wrap justify-center gap-x-5 md:gap-x-8 gap-y-1 md:gap-y-2 text-xs md:text-sm text-white/60"></dl>
+      </div>
+    </div>
+
+    <!-- ===== SOBRE MÍ ===== -->
+    <section id="sobre-mi" class="max-w-7xl mx-auto px-4 md:px-10 py-16 md:py-28 grid md:grid-cols-2 gap-10 md:gap-20 items-center">
+      <div class="overflow-hidden aspect-[4/5]">
+        <!-- CAMBIAR FOTO DE AUTOR AQUÍ: edita ABOUT en el frontmatter -->
+        <img loading="lazy" decoding="async" src={ABOUT.src} data-fb={ABOUT.fb} onerror={FB} alt="Retrato de Julio, fotógrafo" class="about-img w-full h-full object-cover transition duration-[1.5s]" />
+      </div>
+      <div>
+        <h2 class="anton uppercase text-5xl md:text-7xl leading-none mb-6 md:mb-8">Sobre mí</h2>
+        <p class="text-white/70 leading-relaxed max-w-md mb-5">Soy Julio, fotógrafo en Guadalajara. Busco la luz natural y el momento en que nadie posa: una mirada a destiempo, una calle vacía a las siete de la mañana.</p>
+        <p class="text-white/70 leading-relaxed max-w-md mb-10 md:mb-12">Trabajo con retrato, moda editorial, paisaje y ciudad, y colaboro con marcas y medios en producciones a medida.</p>
+        <div class="grid grid-cols-3 gap-3 md:gap-6 border-t border-white/10 pt-6 md:pt-8">
+          <div><div class="anton text-4xl md:text-5xl" data-count="10">0</div><div class="text-xs md:text-sm text-white/50 mt-1">años de experiencia</div></div>
+          <div><div class="anton text-4xl md:text-5xl" data-count="350">0</div><div class="text-xs md:text-sm text-white/50 mt-1">sesiones realizadas</div></div>
+          <div><div class="anton text-4xl md:text-5xl" data-count="40">0</div><div class="text-xs md:text-sm text-white/50 mt-1">producciones de moda</div></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===== CONTACTO ===== -->
+    <section id="contacto" class="max-w-7xl mx-auto px-4 md:px-10 py-16 md:py-28 grid md:grid-cols-2 gap-12 md:gap-16">
+      <div>
+        <h2 class="anton uppercase text-5xl md:text-8xl leading-none mb-6 md:mb-8">Hablemos de tu sesión</h2>
+        <p class="text-white/60 mb-8 md:mb-10 max-w-sm">Cuéntame qué tienes en mente y te respondo en menos de 48 horas.</p>
+        <ul class="space-y-4 text-lg">
+          <!-- CAMBIAR ENLACES DE REDES AQUÍ -->
+          <li><a class="border-b border-white/30 hover:border-white transition" href="https://wa.me/523334881355" target="_blank" rel="noopener">WhatsApp</a></li>
+          <li><a class="border-b border-white/30 hover:border-white transition" href="https://instagram.com/" target="_blank" rel="noopener">Instagram</a></li>
+          <li><a class="border-b border-white/30 hover:border-white transition" href="https://behance.net/" target="_blank" rel="noopener">Behance</a></li>
+          <li><a class="border-b border-white/30 hover:border-white transition break-all" href="mailto:hola@juliofotos.com">hola@juliofotos.com</a></li>
+        </ul>
+      </div>
+      <form id="form" class="space-y-6" novalidate>
+        <label class="block text-sm text-white/60">Nombre<input required name="nombre" class="field text-white text-base" autocomplete="name" /></label>
+        <label class="block text-sm text-white/60">Correo<input required type="email" inputmode="email" name="correo" class="field text-white text-base" autocomplete="email" /></label>
+        <label class="block text-sm text-white/60">Tipo de sesión
+          <select name="tipo" class="field text-white text-base">
+            <option>Retrato</option><option>Moda</option><option>Urbano</option><option>Paisaje</option><option>Evento</option><option>Comercial</option>
+          </select>
+        </label>
+        <label class="block text-sm text-white/60">Mensaje<textarea required name="msg" rows="4" class="field text-white text-base resize-none"></textarea></label>
+        <button class="w-full md:w-auto px-8 py-3 rounded-full bg-[#f4f0e8] text-[#09090b] font-medium hover:bg-white hover:scale-105 active:scale-95 transition">Enviar mensaje</button>
+        <p class="text-xs text-white/40">Se abrirá WhatsApp con tu mensaje ya escrito.</p>
+        <p id="formMsg" class="text-sm min-h-[1.25rem]" role="status"></p>
+      </form>
+    </section>
+
+    <footer class="text-center text-sm text-white/40 py-10 border-t border-white/10">© {year} Julio Fotos</footer>
+
+    <!-- Datos del lightbox, generados en el servidor desde el frontmatter -->
+    <script is:inline type="application/json" id="photos-data" set:html={JSON.stringify(PHOTOS)} />
+
+    <script>
+      // @ts-nocheck
+      const $ = (s) => document.querySelector(s);
+      const PHOTOS = JSON.parse($('#photos-data').textContent);
+      const reduce = document.documentElement.classList.contains('rm');
+
+      /* ============ Runways scroll-scrubbed (hero y selección) ============
+         Sin hijack del scroll: solo se lee la posición y se mueve con transform. */
+      const runways = [...document.querySelectorAll('[data-runway]')].map((el) => ({
+        el,
+        frame: el.querySelector('[data-frame]'),
+        head: el.querySelector('[data-head]'),
+        items: [...el.querySelectorAll('[data-at]')],
+        zoom: el.querySelector('[data-zoom]'),
+        bar: el.querySelector('[data-bar]'),
+        hint: el.querySelector('[data-hint]'),
+        V: 0, T: 0, D: 1,
+      }));
+      function measure() {
+        runways.forEach((r) => {
+          r.V = r.frame.clientWidth;
+          r.T = r.head.offsetWidth;
+          r.D = Math.max(1, r.el.offsetHeight - r.frame.clientHeight);
+        });
+      }
+      let ticking = false;
+      function render() {
+        ticking = false;
+        runways.forEach((r) => {
+          const rect = r.el.getBoundingClientRect();
+          if (rect.bottom < -200 || rect.top > innerHeight + 200) return; // fuera de pantalla
+          const p = Math.min(Math.max(-rect.top / r.D, 0), 1);
+          const x = r.V - p * (r.V + r.T);
+          r.head.style.transform = `translate3d(${x}px, -50%, 0)`;
+          r.items.forEach((it) => {
+            const ix = r.V + +it.dataset.at * r.T - p * +it.dataset.speed * (r.V + r.T);
+            it.style.transform = `translate3d(${ix}px, 0, 0)`;
+          });
+          if (r.zoom) r.zoom.style.transform = `scale(${1.08 - p * 0.08})`;
+          if (r.bar) r.bar.style.transform = `scaleX(${p})`;
+          if (r.hint) r.hint.style.opacity = Math.max(0, 1 - p * 8);
+        });
+      }
+      const request = () => { if (!ticking) { ticking = true; requestAnimationFrame(render); } };
+      if (!reduce) {
+        addEventListener('scroll', request, { passive: true });
+        const ro = new ResizeObserver(() => { measure(); request(); });
+        runways.forEach((r) => { ro.observe(r.frame); ro.observe(r.head); });
+        measure(); render();
+        if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => { measure(); render(); });
+      }
+
+      /* ---- Destacadas: hover/foco por CSS; toque y teclado alternan aria-pressed ---- */
+      const fph = [...document.querySelectorAll('.fphoto')];
+      const reset = $('#featReset');
+      let fPointer = 'mouse';
+      const syncReset = () => { reset.disabled = !fph.some((b) => b.getAttribute('aria-pressed') === 'true'); };
+      fph.forEach((b) => {
+        b.addEventListener('pointerdown', (e) => { fPointer = e.pointerType; });
+        b.addEventListener('click', (e) => {
+          // El clic con mouse no fija el color: al salir vuelve a gris. Toque y teclado sí.
+          if (fPointer === 'mouse' && e.detail !== 0) return;
+          const on = b.getAttribute('aria-pressed') === 'true';
+          fph.forEach((x) => x.setAttribute('aria-pressed', 'false'));
+          b.setAttribute('aria-pressed', String(!on));
+          syncReset();
+        });
+      });
+      reset.addEventListener('click', () => { fph.forEach((x) => x.setAttribute('aria-pressed', 'false')); syncReset(); });
+
+      /* ---- Filtros del masonry (desvanece, luego reacomoda) ---- */
+      const cards = [...document.querySelectorAll('#grid .card')];
+      let visible = cards.map((_, i) => i), cur = 0, filterTimer = 0;
+      document.querySelectorAll('#filters .chip').forEach((chip) => {
+        chip.addEventListener('click', () => {
+          document.querySelectorAll('#filters .chip').forEach((x) => x.classList.toggle('on', x === chip));
+          chip.scrollIntoView({ inline: 'center', block: 'nearest', behavior: reduce ? 'auto' : 'smooth' }); // en celular centra el chip tocado
+          const c = chip.dataset.filter;
+          visible = [];
+          const toHide = [], toShow = [];
+          cards.forEach((card, idx) => {
+            const show = c === 'Todas' || card.dataset.cat === c;
+            if (show) { visible.push(idx); toShow.push(card); } else toHide.push(card);
+          });
+          clearTimeout(filterTimer);
+          toHide.forEach((card) => card.classList.add('fade'));
+          filterTimer = setTimeout(() => {
+            toHide.forEach((card) => { card.hidden = true; });
+            toShow.forEach((card) => { card.hidden = false; card.classList.add('fade'); });
+            void document.body.offsetHeight;              // fuerza el reflujo de columnas
+            requestAnimationFrame(() => toShow.forEach((card) => card.classList.remove('fade')));
+          }, reduce ? 0 : 320);
+        });
+      });
+      cards.forEach((card, i) => card.addEventListener('click', () => openLB(visible.indexOf(i))));
+
+      /* ---- Lightbox ---- */
+      const lb = $('#lb'), lbImg = $('#lbImg');
+      const setImg = (el, p) => { el.onerror = () => { el.onerror = null; el.src = p.fb; }; el.src = p.big || p.src || p.fb; };
+      function showLB() {
+        const p = PHOTOS[visible[cur]];
+        lbImg.style.opacity = 0; lbImg.style.transform = 'scale(.97)';
+        setTimeout(() => { setImg(lbImg, p); lbImg.alt = p.t; lbImg.style.opacity = 1; lbImg.style.transform = 'none'; }, 200);
+        $('#lbTitle').textContent = p.t;
+        $('#lbCount').textContent = `${cur + 1} de ${visible.length}`;
+        const m = String(p.lens).match(/^(.*?)\s*(f\/[\d.]+)$/);
+        $('#lbMeta').innerHTML = [['Cámara', p.cam], ['Lente', m ? m[1] : p.lens], ['Apertura', m ? m[2] : '—'], ['ISO', p.iso]]
+          .map(([k, v]) => `<div><dt class="inline text-white/35">${k}: </dt><dd class="inline text-white">${v}</dd></div>`).join('');
+      }
+      function openLB(i) { cur = i; showLB(); lb.classList.add('open'); document.body.style.overflow = 'hidden'; $('#lbClose').focus(); }
+      function closeLB() { lb.classList.remove('open'); document.body.style.overflow = ''; }
+      const step = (d) => { cur = (cur + d + visible.length) % visible.length; showLB(); };
+      $('#lbClose').onclick = closeLB;
+      $('#lbPrev').onclick = () => step(-1);
+      $('#lbNext').onclick = () => step(1);
+      lb.addEventListener('click', (e) => { if (e.target === lb) closeLB(); });
+      document.addEventListener('keydown', (e) => {
+        if (!lb.classList.contains('open')) return;
+        if (e.key === 'Escape') closeLB();
+        if (e.key === 'ArrowLeft') step(-1);
+        if (e.key === 'ArrowRight') step(1);
+      });
+      let tx = 0;
+      lb.addEventListener('touchstart', (e) => (tx = e.touches[0].clientX), { passive: true });
+      lb.addEventListener('touchend', (e) => { const d = e.changedTouches[0].clientX - tx; if (Math.abs(d) > 50) step(d > 0 ? -1 : 1); });
+
+      /* ---- Cursor "J": sigue al mouse con lerp; se expande y muestra etiqueta en hover ---- */
+      // CAMBIAR CURSOR J AQUÍ: cada fila es [selector, etiqueta]. '' = solo se expande · null = se oculta (campos de texto).
+      // También puedes poner data-cursor="Texto" en cualquier elemento.
+      (() => {
+        const cur = $('#cursor');
+        if (!cur || !document.documentElement.classList.contains('has-cursor')) return;
+        const label = cur.querySelector('.cur-label');
+        const CUR_LABELS = [
+          ['input, textarea, select', null],
+          ['.peel-hit', 'Despegar'],
+          ['.card', 'Abrir'],
+          ['.fphoto', 'Ver'],
+          ['#lbClose', 'Cerrar'],
+          ['#form button', 'Enviar'],
+          ['.chip', 'Filtrar'],
+          ['#featReset', 'Reset'],
+          ['a, button, [data-cursor]', ''],
+        ];
+        let mx = innerWidth / 2, my = innerHeight / 2, x = mx, y = my, raf = 0, shown = false;
+        const k = reduce ? 1 : 0.18; // lerp: menor = más suave
+        const tick = () => {
+          x += (mx - x) * k; y += (my - y) * k;
+          cur.style.transform = `translate3d(${x}px, ${y}px, 0)`;
+          raf = Math.abs(mx - x) > 0.1 || Math.abs(my - y) > 0.1 ? requestAnimationFrame(tick) : 0;
+        };
+        addEventListener('pointermove', (e) => {
+          if (e.pointerType !== 'mouse') return;
+          mx = e.clientX; my = e.clientY;
+          if (!shown) { shown = true; x = mx; y = my; cur.classList.add('on'); }
+          if (!raf) raf = requestAnimationFrame(tick);
+        }, { passive: true });
+        document.documentElement.addEventListener('mouseleave', () => cur.classList.remove('on'));
+        document.documentElement.addEventListener('mouseenter', () => { if (shown) cur.classList.add('on'); });
+        document.addEventListener('mouseover', (e) => {
+          const t = e.target;
+          let txt = null, state = 'base';
+          if (t && t.closest) {
+            for (const [sel, l] of CUR_LABELS) {
+              const el = t.closest(sel);
+              if (!el) continue;
+              if (l === null) { state = 'hide'; break; }
+              txt = el.dataset.cursor ?? l; state = 'hover'; break;
+            }
+          }
+          cur.classList.toggle('hide', state === 'hide');
+          cur.classList.toggle('hover', state === 'hover');
+          cur.classList.toggle('is-label', !!txt);
+          label.textContent = txt || '';
+        });
+        addEventListener('mousedown', () => cur.classList.add('down'));
+        addEventListener('mouseup', () => cur.classList.remove('down'));
+      })();
+
+      /* ---- Contadores ---- */
+      const io = new IntersectionObserver((es) => es.forEach((en) => {
+        if (!en.isIntersecting) return;
+        io.unobserve(en.target);
+        const t = +en.target.dataset.count; let n = 0;
+        const id = setInterval(() => { n += Math.ceil(t / 40); if (n >= t) { n = t; clearInterval(id); } en.target.textContent = n + '+'; }, 30);
+      }), { threshold: 0.6 });
+      document.querySelectorAll('[data-count]').forEach((el) => io.observe(el));
+
+      /* ---- Formulario ---- */
+      $('#form').addEventListener('submit', (e) => {
+        e.preventDefault();
+        const f = e.target, m = $('#formMsg');
+        if (!f.nombre.value.trim() || !/\S+@\S+\.\S+/.test(f.correo.value) || !f.msg.value.trim()) {
+          m.textContent = 'Completa tu nombre, un correo válido y un mensaje.'; m.style.color = '#e08a8a'; return;
+        }
+        // CAMBIAR NÚMERO DE WHATSAPP AQUÍ (formato internacional, sin "+" ni espacios)
+        const WA = '523334881355';
+        const text = [
+          'Hola Julio, te escribo desde tu portafolio.',
+          '',
+          `*Nombre:* ${f.nombre.value.trim()}`,
+          `*Correo:* ${f.correo.value.trim()}`,
+          `*Tipo de sesión:* ${f.tipo.value}`,
+          `*Mensaje:* ${f.msg.value.trim()}`,
+        ].join('\n');
+        const a = document.createElement('a');
+        a.href = `https://wa.me/${WA}?text=${encodeURIComponent(text)}`;
+        a.target = '_blank'; a.rel = 'noopener';
+        document.body.appendChild(a); a.click(); a.remove();
+        m.textContent = 'Abriendo WhatsApp con tu mensaje listo…'; m.style.color = '#f4f0e8'; f.reset();
+      });
+    </script>
+
+    <style is:global>
+      html { scroll-behavior: smooth; background: #09090b; scroll-padding-top: 4.5rem; -webkit-text-size-adjust: 100%; }
+      body { background: #09090b; color: #f4f0e8; font-family: 'Inter', sans-serif; overflow-x: clip; }
+      .anton { font-family: 'Anton', 'Bebas Neue', Impact, sans-serif; }
+      .no-scrollbar { scrollbar-width: none; -ms-overflow-style: none; }
+      .no-scrollbar::-webkit-scrollbar { display: none; }
+      /* Runways: sombra de profundidad en los titulares */
+      [data-head] { text-shadow: 0 .02em .06em rgba(0,0,0,.45), 0 .06em .25em rgba(0,0,0,.35); will-change: transform; }
+      [data-at] { will-change: transform; }
+      [data-zoom] { transform: scale(1.08); }
+      /* Destacadas: gris a color, misma imagen fuente (sin desfases) */
+      .fphoto { -webkit-tap-highlight-color: transparent; }
+      .fphoto img { filter: grayscale(1); transition: filter .5s ease; }
+      .fphoto:focus-visible { outline: 2px solid #f4f0e8; outline-offset: -6px; }
+      .fphoto:focus-visible img, .fphoto[aria-pressed="true"] img { filter: grayscale(0); }
+      @media (hover: hover) { .fphoto:hover img { filter: grayscale(0); } }
+      .featured-title { text-shadow: 0 .03em .25em rgba(0,0,0,.55); }
+      .serif-it { font-family: 'Fraunces', Georgia, serif; font-style: italic; font-weight: 300; }
+      .rm .fphoto img { transition: none; }
+      /* Galería masonry */
+      .card { transition: opacity .35s ease, transform .35s ease; cursor: zoom-in; -webkit-tap-highlight-color: transparent; }
+      .card[hidden] { display: none; }
+      .card.fade { opacity: 0; transform: scale(.94); }
+      .card img { transition: transform 1s cubic-bezier(.19,1,.22,1); }
+      .card .cap { transition: opacity .4s; opacity: 0; }
+      .card .cap > * { transform: translateY(8px); transition: transform .4s; }
+      .card:focus-visible .cap { opacity: 1; }
+      @media (hover: hover) {
+        .card:hover img { transform: scale(1.05); }
+        .card:hover .cap { opacity: 1; }
+        .card:hover .cap > * { transform: none; }
+        .about-img:hover { transform: scale(1.05); }
+      }
+      /* Celular: el pie de foto siempre visible, sutil y pegado abajo */
+      @media (hover: none) {
+        .card .cap { opacity: 1; background: linear-gradient(to top, rgba(0,0,0,.75), rgba(0,0,0,0) 55%); }
+        .card .cap > * { transform: none; }
+      }
+      .chip { transition: background .3s, color .3s; }
+      .chip.on { background: #f4f0e8; color: #09090b; }
+      /* Lightbox */
+      #lb { opacity: 0; pointer-events: none; transition: opacity .4s; padding-bottom: env(safe-area-inset-bottom); }
+      #lb.open { opacity: 1; pointer-events: auto; }
+      #lb img { transition: opacity .3s, transform .5s; }
+      /* Formulario */
+      .field { background: transparent; border-bottom: 1px solid #3a3a3a; padding: .9rem 0; width: 100%; outline: none; transition: border-color .3s; border-radius: 0; }
+      .field:focus { border-color: #f4f0e8; }
+      select.field option { background: #09090b; }
+      :focus-visible { outline: 2px solid #f4f0e8; outline-offset: 3px; }
+
+      /* Cursor J (CAMBIAR CURSOR J AQUÍ: tamaño, color y tipografía) */
+      html.has-cursor, html.has-cursor * { cursor: none !important; }
+      html.has-cursor input, html.has-cursor textarea, html.has-cursor select { cursor: auto !important; }
+      #cursor { position: fixed; left: 0; top: 0; z-index: 100; pointer-events: none; display: none; opacity: 0; transition: opacity .25s; mix-blend-mode: difference; will-change: transform; }
+      html.has-cursor #cursor { display: block; }
+      #cursor.on:not(.hide) { opacity: 1; }
+      .cur-ring { position: relative; width: 44px; height: 44px; margin: -22px 0 0 -22px; display: grid; place-items: center; }
+      .cur-ring::before { content: ''; position: absolute; inset: 0; border: 1px solid #f4f0e8; border-radius: 50%; transition: transform .35s cubic-bezier(.19,1,.22,1), background .3s; }
+      .cur-j { font: italic 300 22px/1 'Fraunces', Georgia, serif; color: #f4f0e8; transition: opacity .2s; }
+      .cur-label { position: absolute; font: 500 10px/1 'Inter', sans-serif; letter-spacing: .14em; text-transform: uppercase; color: #09090b; opacity: 0; transition: opacity .2s; white-space: nowrap; }
+      #cursor.hover .cur-ring::before { transform: scale(1.5); }
+      #cursor.is-label { mix-blend-mode: normal; }
+      #cursor.is-label .cur-ring::before { transform: scale(1.95); background: #f4f0e8; }
+      #cursor.is-label .cur-j { opacity: 0; }
+      #cursor.is-label .cur-label { opacity: 1; }
+      #cursor.down .cur-ring::before { transform: scale(.8); }
+      #cursor.down.is-label .cur-ring::before { transform: scale(1.7); }
+      @media (hover: none), (pointer: coarse) { #cursor { display: none !important; } }
+
+      /* prefers-reduced-motion: sin runways, composición estática */
+      .rm [data-runway] { height: auto; }
+      .rm [data-frame] { position: relative; height: auto; min-height: 100svh; display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 1rem; padding: 7rem 1rem 4rem; }
+      .rm [data-head] { position: static !important; transform: none !important; width: auto; white-space: normal; text-align: center; flex-basis: 100%; font-size: clamp(64px, 14vw, 180px) !important; z-index: 20; }
+      .rm [data-at] { position: static !important; transform: none !important; width: clamp(110px, 22vw, 260px) !important; }
+      .rm [data-zoom] { transform: none; }
+      .rm [data-bar], .rm [data-hint] { display: none; }
+      @media (prefers-reduced-motion: reduce) { * { animation-duration: .01ms !important; transition-duration: .01ms !important; scroll-behavior: auto !important; } }
+    </style>
+  </body>
+</html>
