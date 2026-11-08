@@ -13,7 +13,8 @@
   },
   "dependencies": {
     "astro": "^7.4.7",
-    "googleapis": "^189.0.0"
+    "googleapis": "^189.0.0",
+    "three": "^0.170.0"
   },
   "devDependencies": {
     "@types/node": "^26.6.6"
