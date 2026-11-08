@@ -1,5 +1,8 @@
 ---
 import JellyfishPeel from '../components/JellyfishPeel.astro';
+// Se genera en cada visita (no una sola vez al hacer build) para que las fotos nuevas de Drive aparezcan solas.
+// Requiere el adaptador de Vercel: npx astro add vercel
+export const prerender = false;
 import { google } from 'googleapis';
 import path from 'node:path';
 
@@ -97,8 +100,11 @@ const FIELDS = 'nextPageToken, files(id, name, imageMediaMetadata(width,height,r
 const cleanName = (n: string) => n.replace(/\.[^.]+$/, '').replace(/[_-]+/g, ' ').trim() || 'Fotografía';
 
 try {
+  // CAMBIAR CREDENCIALES AQUÍ: en Vercel se leen de la variable GOOGLE_CREDENTIALS (todo el JSON pegado);
+  // en tu PC, si no existe esa variable, se usa el archivo credentials.json de la raíz.
+  const rawCreds = import.meta.env.GOOGLE_CREDENTIALS ?? process.env.GOOGLE_CREDENTIALS;
   const auth = new google.auth.GoogleAuth({
-    keyFile: path.join(process.cwd(), 'credentials.json'),
+    ...(rawCreds ? { credentials: JSON.parse(rawCreds) } : { keyFile: path.join(process.cwd(), 'credentials.json') }),
     scopes: ['https://www.googleapis.com/auth/drive.readonly'],
   });
   const drive: any = google.drive({ version: 'v3', auth });
@@ -154,6 +160,10 @@ try {
   driveError = e instanceof Error ? e.message : String(e);
   console.error('[Drive] No se pudo cargar la galería, uso el respaldo local:', driveError);
 }
+
+// Caché en Vercel: la página se regenera como máximo cada 5 min (rápida y sin gastar la cuota de Drive).
+// Subir 'max-age' o 's-maxage' = menos llamadas a Drive; bajarlo = fotos nuevas más rápido.
+Astro.response.headers.set('Cache-Control', 'public, max-age=0, s-maxage=300, stale-while-revalidate=600');
 
 const PHOTOS: any[] = drivePhotos.length ? drivePhotos : PHOTOS_LOCAL;
 const CATS = drivePhotos.length ? ['Todas', ...driveCats] : ['Todas', 'Retrato', 'Moda', 'Urbano', 'Paisaje'];
